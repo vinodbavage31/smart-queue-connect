@@ -242,6 +242,19 @@ export default function OwnerDashboard() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-4 space-y-6">
+        {/* Pending Notice */}
+        {business.status === 'pending' && (
+          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 text-center">
+            <p className="text-sm font-medium text-warning">⏳ Your business is pending admin approval</p>
+            <p className="text-xs text-muted-foreground mt-1">Customers won't see your business until it's approved.</p>
+          </div>
+        )}
+        {business.status === 'rejected' && (
+          <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 text-center">
+            <p className="text-sm font-medium text-destructive">❌ Your business registration was rejected</p>
+            <p className="text-xs text-muted-foreground mt-1">Please contact support for more information.</p>
+          </div>
+        )}
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-card card-outline rounded-xl p-4 text-center">
