@@ -23,11 +23,26 @@ export default function AdminDashboard() {
 
   const fetchBusinesses = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data: bizData } = await supabase
       .from('businesses')
-      .select('*, profiles!businesses_owner_id_fkey(full_name)')
+      .select('*')
       .order('created_at', { ascending: false });
-    setBusinesses(data || []);
+    
+    if (bizData) {
+      // Fetch owner profiles
+      const ownerIds = [...new Set(bizData.map(b => b.owner_id))];
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', ownerIds);
+      
+      const profileMap = new Map(profiles?.map(p => [p.id, p.full_name]) || []);
+      const enriched = bizData.map(b => ({
+        ...b,
+        owner_name: profileMap.get(b.owner_id) || 'Unknown',
+      }));
+      setBusinesses(enriched);
+    }
     setLoading(false);
   };
 
