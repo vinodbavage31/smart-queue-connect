@@ -81,7 +81,7 @@ export default function OwnerDashboard() {
     } else {
       setBusiness(data);
       setShowSetup(false);
-      toast({ title: 'Business created!' });
+      toast({ title: 'Business created!', description: 'Your business is pending admin approval.' });
     }
     setCreating(false);
   };
