@@ -81,8 +81,10 @@ export type Database = {
           description: string | null
           id: string
           is_open: boolean
+          is_queue_paused: boolean | null
           latitude: number | null
           longitude: number | null
+          max_queue_size: number | null
           name: string
           open_time: string | null
           owner_id: string
@@ -99,8 +101,10 @@ export type Database = {
           description?: string | null
           id?: string
           is_open?: boolean
+          is_queue_paused?: boolean | null
           latitude?: number | null
           longitude?: number | null
+          max_queue_size?: number | null
           name: string
           open_time?: string | null
           owner_id: string
@@ -117,8 +121,10 @@ export type Database = {
           description?: string | null
           id?: string
           is_open?: boolean
+          is_queue_paused?: boolean | null
           latitude?: number | null
           longitude?: number | null
+          max_queue_size?: number | null
           name?: string
           open_time?: string | null
           owner_id?: string

@@ -3,9 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Clock, Users, MapPin, Loader2, Check, LogIn } from 'lucide-react';
+import { ArrowLeft, Clock, Users, MapPin, Loader2, Check, LogIn, AlertCircle, Navigation } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Service = Tables<'services'>;
@@ -24,11 +26,54 @@ export default function BusinessDetail() {
   const [joined, setJoined] = useState(false);
   const [tokenInfo, setTokenInfo] = useState<{ token: number; position: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasActiveBooking, setHasActiveBooking] = useState(false);
+  const [confirmedOnWay, setConfirmedOnWay] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     fetchData();
-  }, [id]);
+  }, [id, user]);
+
+  // Realtime subscription for queue updates
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(`queue-${id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `business_id=eq.${id}`,
+      }, async () => {
+        // Refresh queue count
+        const { count } = await supabase
+          .from('bookings')
+          .select('*', { count: 'exact', head: true })
+          .eq('business_id', id)
+          .eq('status', 'waiting');
+        setQueueCount(count || 0);
+
+        // Refresh user's booking position if joined
+        if (user && joined) {
+          const { data: myBooking } = await supabase
+            .from('bookings')
+            .select('token_number, position, status')
+            .eq('business_id', id)
+            .eq('user_id', user.id)
+            .in('status', ['waiting', 'calling', 'in_progress'])
+            .maybeSingle();
+          if (myBooking) {
+            setTokenInfo({ token: myBooking.token_number, position: myBooking.position });
+          } else {
+            setJoined(false);
+            setTokenInfo(null);
+          }
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [id, user, joined]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -40,20 +85,48 @@ export default function BusinessDetail() {
     if (bizRes.data) setBusiness(bizRes.data);
     if (svcRes.data) setServices(svcRes.data);
     setQueueCount(countRes.count || 0);
+
+    // Check if user has active booking at this business
+    if (user) {
+      const { data: activeBooking } = await supabase
+        .from('bookings')
+        .select('token_number, position, status')
+        .eq('business_id', id!)
+        .eq('user_id', user.id)
+        .in('status', ['waiting', 'calling', 'in_progress'])
+        .maybeSingle();
+      if (activeBooking) {
+        setHasActiveBooking(true);
+        setJoined(true);
+        setTokenInfo({ token: activeBooking.token_number, position: activeBooking.position });
+      }
+    }
     setLoading(false);
   };
 
   const handleJoinQueue = async () => {
-    // If not authenticated, redirect to auth with return URL
     if (!user) {
       navigate(`/auth?redirect=/business/${id}`);
       return;
     }
-
     if (!selectedService || !business) return;
     setJoining(true);
 
     try {
+      // Check queue capacity
+      if ((business as any).max_queue_size && queueCount >= (business as any).max_queue_size) {
+        toast({ title: 'Queue Full', description: 'This business has reached maximum queue capacity.', variant: 'destructive' });
+        setJoining(false);
+        return;
+      }
+
+      // Check if queue is paused
+      if ((business as any).is_queue_paused) {
+        toast({ title: 'Queue Paused', description: 'This business has temporarily paused their queue.', variant: 'destructive' });
+        setJoining(false);
+        return;
+      }
+
       const today = new Date().toISOString().split('T')[0];
       const { data: lastToken } = await supabase
         .from('bookings')
@@ -83,7 +156,16 @@ export default function BusinessDetail() {
         status: 'waiting',
       });
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === '23505') {
+          toast({ title: 'Already in Queue', description: 'You already have an active booking at this business.', variant: 'destructive' });
+          setHasActiveBooking(true);
+        } else {
+          throw error;
+        }
+        setJoining(false);
+        return;
+      }
 
       await supabase.from('notifications').insert({
         user_id: user.id,
@@ -94,6 +176,7 @@ export default function BusinessDetail() {
 
       setTokenInfo({ token: nextToken, position });
       setJoined(true);
+      setHasActiveBooking(true);
       setQueueCount(prev => prev + 1);
 
       toast({ title: 'Queue joined!', description: `Your token number is #${nextToken}` });
@@ -102,6 +185,11 @@ export default function BusinessDetail() {
     } finally {
       setJoining(false);
     }
+  };
+
+  const handleConfirmOnWay = async () => {
+    setConfirmedOnWay(true);
+    toast({ title: "Confirmed!", description: "The business knows you're on your way." });
   };
 
   if (loading) {
@@ -121,6 +209,7 @@ export default function BusinessDetail() {
   }
 
   const estimatedWait = queueCount * business.avg_service_mins;
+  const isQueuePaused = (business as any).is_queue_paused;
 
   return (
     <div className="min-h-screen bg-background">
@@ -140,7 +229,7 @@ export default function BusinessDetail() {
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1 text-xs font-medium text-success bg-success/10 px-2 py-1 rounded-full">
               <span className="h-1.5 w-1.5 rounded-full bg-success pulse-live" />
-              Open Now
+              {isQueuePaused ? 'Queue Paused' : 'Open Now'}
             </span>
             {business.category && (
               <span className="text-xs bg-secondary text-secondary-foreground px-2 py-1 rounded-full">
@@ -154,10 +243,10 @@ export default function BusinessDetail() {
               {business.address}
             </p>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="bg-card card-outline rounded-lg p-3">
               <p className="text-xs text-muted-foreground flex items-center gap-1">
-                <Users className="h-3 w-3" /> Queue Length
+                <Users className="h-3 w-3" /> Queue
               </p>
               <p className="text-2xl font-bold text-foreground mt-1">{queueCount}</p>
             </div>
@@ -167,8 +256,34 @@ export default function BusinessDetail() {
               </p>
               <p className="text-2xl font-bold text-foreground mt-1">~{estimatedWait}m</p>
             </div>
+            <div className="bg-card card-outline rounded-lg p-3">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Avg Svc
+              </p>
+              <p className="text-2xl font-bold text-foreground mt-1">{business.avg_service_mins}m</p>
+            </div>
           </div>
+          {/* Queue Progress */}
+          {queueCount > 0 && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Queue capacity</span>
+                <span>{queueCount}/{(business as any).max_queue_size || 50}</span>
+              </div>
+              <Progress value={(queueCount / ((business as any).max_queue_size || 50)) * 100} className="h-2" />
+            </div>
+          )}
         </div>
+
+        {/* Active booking warning */}
+        {hasActiveBooking && !joined && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              You already have an active queue at this business.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Token Card (after joining) */}
         {joined && tokenInfo && (
@@ -182,21 +297,48 @@ export default function BusinessDetail() {
               <span className="bg-primary-foreground/20 px-2 py-1 rounded text-xs">Live Update</span>
             </div>
             <div className="token-number mt-2">#{tokenInfo.token}</div>
-            <div className="grid grid-cols-2 gap-4 pt-4 mt-4 border-t border-primary-foreground/10">
+            <div className="grid grid-cols-3 gap-4 pt-4 mt-4 border-t border-primary-foreground/10">
               <div>
                 <p className="text-xs opacity-70">Position</p>
                 <p className="text-xl font-semibold">{tokenInfo.position}</p>
+              </div>
+              <div>
+                <p className="text-xs opacity-70">People Ahead</p>
+                <p className="text-xl font-semibold">{Math.max(0, tokenInfo.position - 1)}</p>
               </div>
               <div>
                 <p className="text-xs opacity-70">Est. Wait</p>
                 <p className="text-xl font-semibold">~{tokenInfo.position * business.avg_service_mins}m</p>
               </div>
             </div>
+            {/* Queue progress for user */}
+            <div className="mt-4 space-y-1">
+              <div className="flex justify-between text-xs opacity-70">
+                <span>Queue progress</span>
+                <span>{Math.max(0, queueCount - tokenInfo.position + 1)} served</span>
+              </div>
+              <Progress 
+                value={Math.max(5, ((queueCount - tokenInfo.position + 1) / Math.max(1, queueCount)) * 100)} 
+                className="h-2 bg-primary-foreground/20"
+              />
+            </div>
           </motion.div>
         )}
 
+        {/* I'm on my way button */}
+        {joined && tokenInfo && tokenInfo.position <= 5 && !confirmedOnWay && (
+          <Button
+            onClick={handleConfirmOnWay}
+            variant="outline"
+            className="w-full border-success text-success hover:bg-success/5"
+          >
+            <Navigation className="mr-2 h-4 w-4" />
+            I'm on my way!
+          </Button>
+        )}
+
         {/* Services */}
-        {!joined && (
+        {!joined && !hasActiveBooking && (
           <div className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
               Select Service
@@ -234,7 +376,12 @@ export default function BusinessDetail() {
               </div>
             )}
 
-            {!user ? (
+            {isQueuePaused ? (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>Queue is currently paused. Please check back later.</AlertDescription>
+              </Alert>
+            ) : !user ? (
               <Button
                 onClick={() => navigate(`/auth?redirect=/business/${id}`)}
                 className="w-full h-12 text-base font-semibold"

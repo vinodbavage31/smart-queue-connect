@@ -4,8 +4,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Progress } from '@/components/ui/progress';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Users, Clock, Phone, CheckCircle2, Loader2, LogOut, Settings, Bell } from 'lucide-react';
+import { Plus, Users, Clock, Phone, CheckCircle2, Loader2, LogOut, Bell, Pause, Play, UserX, BarChart3 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -15,6 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function OwnerDashboard() {
   const { user, signOut } = useAuth();
@@ -22,6 +25,7 @@ export default function OwnerDashboard() {
   const { toast } = useToast();
   const [business, setBusiness] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
+  const [completedToday, setCompletedToday] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSetup, setShowSetup] = useState(false);
   const [setupForm, setSetupForm] = useState({
@@ -30,10 +34,30 @@ export default function OwnerDashboard() {
   const [creating, setCreating] = useState(false);
   const [showAddService, setShowAddService] = useState(false);
   const [serviceForm, setServiceForm] = useState({ name: '', duration_mins: '15', price: '' });
+  const [activeTab, setActiveTab] = useState('queue');
 
   useEffect(() => {
     fetchBusiness();
   }, [user]);
+
+  // Realtime subscription for bookings
+  useEffect(() => {
+    if (!business) return;
+    const channel = supabase
+      .channel(`owner-queue-${business.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `business_id=eq.${business.id}`,
+      }, () => {
+        fetchBookings(business.id);
+        fetchCompletedToday(business.id);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [business?.id]);
 
   const fetchBusiness = async () => {
     if (!user) return;
@@ -46,7 +70,7 @@ export default function OwnerDashboard() {
 
     if (biz) {
       setBusiness(biz);
-      await fetchBookings(biz.id);
+      await Promise.all([fetchBookings(biz.id), fetchCompletedToday(biz.id)]);
     } else {
       setShowSetup(true);
     }
@@ -61,6 +85,18 @@ export default function OwnerDashboard() {
       .in('status', ['waiting', 'calling', 'in_progress'])
       .order('position', { ascending: true });
     setBookings(data || []);
+  };
+
+  const fetchCompletedToday = async (bizId: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await supabase
+      .from('bookings')
+      .select('*, profiles(full_name), services(name)')
+      .eq('business_id', bizId)
+      .in('status', ['completed', 'no_show'])
+      .gte('created_at', today)
+      .order('completed_at', { ascending: false });
+    setCompletedToday(data || []);
   };
 
   const createBusiness = async (e: React.FormEvent) => {
@@ -110,7 +146,6 @@ export default function OwnerDashboard() {
       .update({ status: 'calling' })
       .eq('id', bookingId);
     if (!error) {
-      // Send notification
       await supabase.from('notifications').insert({
         user_id: userId,
         title: "It's your turn!",
@@ -119,42 +154,100 @@ export default function OwnerDashboard() {
         booking_id: bookingId,
       });
       toast({ title: 'Customer called!' });
-      await fetchBookings(business.id);
     }
   };
 
   const completeService = async (bookingId: string, userId: string) => {
-    // Mark as completed
     const { error } = await supabase
       .from('bookings')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('id', bookingId);
 
     if (!error) {
-      // Decrement positions for remaining waiting bookings
-      const waitingBookings = bookings.filter(b => b.status === 'waiting');
-      for (const b of waitingBookings) {
+      // Recalculate positions for remaining waiting bookings
+      const waitingBookings = bookings
+        .filter(b => b.status === 'waiting')
+        .sort((a, b) => a.position - b.position);
+      
+      for (let i = 0; i < waitingBookings.length; i++) {
         await supabase
           .from('bookings')
-          .update({ position: Math.max(1, b.position - 1) })
-          .eq('id', b.id);
+          .update({ position: i + 1 })
+          .eq('id', waitingBookings[i].id);
       }
 
-      // Notify user whose turn is within 3 positions
-      const nearFront = waitingBookings.find(b => b.position <= 4);
-      if (nearFront) {
-        const estWait = (nearFront.position - 1) * (business.avg_service_mins || 15);
+      // Auto-call next if no one is currently being called
+      const callingBookings = bookings.filter(b => b.status === 'calling' && b.id !== bookingId);
+      if (callingBookings.length === 0 && waitingBookings.length > 0) {
+        const nextInLine = waitingBookings[0];
+        await supabase
+          .from('bookings')
+          .update({ status: 'calling' })
+          .eq('id', nextInLine.id);
+        
         await supabase.from('notifications').insert({
-          user_id: nearFront.user_id,
+          user_id: nextInLine.user_id,
+          title: "It's your turn!",
+          message: `You're being called at ${business.name}. Please proceed now.`,
+          type: 'calling',
+          booking_id: nextInLine.id,
+        });
+      }
+
+      // Notify customers within 3 positions
+      for (const b of waitingBookings.slice(0, 3)) {
+        const estWait = (waitingBookings.indexOf(b)) * (business.avg_service_mins || 15);
+        await supabase.from('notifications').insert({
+          user_id: b.user_id,
           title: 'Almost your turn!',
-          message: `You're ${nearFront.position - 1 > 0 ? `position ${nearFront.position - 1}` : 'next'} at ${business.name}. Estimated wait: ~${estWait} minutes.`,
+          message: `You're position ${waitingBookings.indexOf(b) + 1} at ${business.name}. Est. wait: ~${estWait} min.`,
           type: 'reminder',
-          booking_id: nearFront.id,
+          booking_id: b.id,
         });
       }
 
       toast({ title: 'Service completed!' });
-      await fetchBookings(business.id);
+    }
+  };
+
+  const markNoShow = async (bookingId: string, userId: string) => {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ status: 'no_show', completed_at: new Date().toISOString() })
+      .eq('id', bookingId);
+    
+    if (!error) {
+      // Recalculate positions
+      const waitingBookings = bookings
+        .filter(b => b.status === 'waiting')
+        .sort((a, b) => a.position - b.position);
+      for (let i = 0; i < waitingBookings.length; i++) {
+        await supabase
+          .from('bookings')
+          .update({ position: i + 1 })
+          .eq('id', waitingBookings[i].id);
+      }
+
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        title: 'Marked as No-Show',
+        message: `You were marked as no-show at ${business.name}. You can rejoin the queue if needed.`,
+        type: 'info',
+        booking_id: bookingId,
+      });
+      toast({ title: 'Marked as no-show' });
+    }
+  };
+
+  const toggleQueuePause = async () => {
+    const newValue = !business.is_queue_paused;
+    const { error } = await supabase
+      .from('businesses')
+      .update({ is_queue_paused: newValue })
+      .eq('id', business.id);
+    if (!error) {
+      setBusiness({ ...business, is_queue_paused: newValue });
+      toast({ title: newValue ? 'Queue paused' : 'Queue resumed' });
     }
   };
 
@@ -177,7 +270,6 @@ export default function OwnerDashboard() {
     );
   }
 
-  // Business setup form
   if (showSetup) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
@@ -223,6 +315,7 @@ export default function OwnerDashboard() {
 
   const waitingCount = bookings.filter(b => b.status === 'waiting').length;
   const callingCount = bookings.filter(b => b.status === 'calling').length;
+  const maxQueue = business.max_queue_size || 50;
 
   return (
     <div className="min-h-screen bg-background">
@@ -252,130 +345,202 @@ export default function OwnerDashboard() {
         {business.status === 'rejected' && (
           <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 text-center">
             <p className="text-sm font-medium text-destructive">❌ Your business registration was rejected</p>
-            <p className="text-xs text-muted-foreground mt-1">Please contact support for more information.</p>
           </div>
         )}
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-card card-outline rounded-xl p-4 text-center">
-            <Users className="h-5 w-5 mx-auto text-muted-foreground" />
-            <p className="text-2xl font-bold text-foreground mt-1">{waitingCount}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Waiting</p>
-          </div>
-          <div className="bg-card card-outline rounded-xl p-4 text-center">
-            <Phone className="h-5 w-5 mx-auto text-success" />
-            <p className="text-2xl font-bold text-foreground mt-1">{callingCount}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Calling</p>
-          </div>
-          <div className="bg-card card-outline rounded-xl p-4 text-center">
-            <Clock className="h-5 w-5 mx-auto text-muted-foreground" />
-            <p className="text-2xl font-bold text-foreground mt-1">~{waitingCount * business.avg_service_mins}m</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Wait</p>
-          </div>
-        </div>
 
-        {/* Add Service */}
-        <Dialog open={showAddService} onOpenChange={setShowAddService}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Add Service
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add Service</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={addService} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Service Name</Label>
-                <Input value={serviceForm.name} onChange={e => setServiceForm(p => ({ ...p, name: e.target.value }))} required />
-              </div>
-              <div className="space-y-2">
-                <Label>Duration (mins)</Label>
-                <Input type="number" value={serviceForm.duration_mins} onChange={e => setServiceForm(p => ({ ...p, duration_mins: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Price ($)</Label>
-                <Input type="number" step="0.01" value={serviceForm.price} onChange={e => setServiceForm(p => ({ ...p, price: e.target.value }))} />
-              </div>
-              <Button type="submit" className="w-full">Add Service</Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-
-        {/* Queue List */}
-        <div className="space-y-2">
-          <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-            Live Queue
-          </h2>
-          {bookings.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No customers in queue</p>
+        {/* Queue Pause Toggle */}
+        <div className="flex items-center justify-between bg-card card-outline rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            {business.is_queue_paused ? <Pause className="h-5 w-5 text-warning" /> : <Play className="h-5 w-5 text-success" />}
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Queue {business.is_queue_paused ? 'Paused' : 'Active'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {business.is_queue_paused ? 'No new customers can join' : 'Accepting new customers'}
+              </p>
             </div>
-          ) : (
-            <AnimatePresence>
-              {bookings.map((b, i) => (
-                <motion.div
-                  key={b.id}
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, x: -100 }}
-                  transition={{ delay: i * 0.05 }}
-                  className={`flex items-center justify-between p-4 bg-card card-outline rounded-xl ${
-                    b.status === 'calling' ? 'ring-2 ring-success/50' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="text-lg font-bold text-muted-foreground w-8">{b.position}.</span>
-                    <div>
-                      <h4 className="font-semibold text-card-foreground">
-                        {b.profiles?.full_name || 'Customer'}
-                      </h4>
-                      <p className="text-xs text-muted-foreground">
-                        {b.services?.name} • Token #{b.token_number}
-                        {b.status === 'calling' && (
-                          <span className="text-success font-medium ml-1">• Called</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => sendNotification(b.user_id, b.id)}
-                      title="Send reminder"
-                    >
-                      <Bell className="h-4 w-4" />
-                    </Button>
-                    {b.status === 'waiting' && (
-                      <Button
-                        size="sm"
-                        onClick={() => callNext(b.id, b.user_id)}
-                      >
-                        Call
-                      </Button>
-                    )}
-                    {(b.status === 'calling' || b.status === 'in_progress') && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-success border-success/20 hover:bg-success/5"
-                        onClick={() => completeService(b.id, b.user_id)}
-                      >
-                        <CheckCircle2 className="h-4 w-4 mr-1" />
-                        Done
-                      </Button>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          )}
+          </div>
+          <Switch checked={!business.is_queue_paused} onCheckedChange={toggleQueuePause} />
         </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-2">
+          <div className="bg-card card-outline rounded-xl p-3 text-center">
+            <Users className="h-4 w-4 mx-auto text-muted-foreground" />
+            <p className="text-xl font-bold text-foreground mt-1">{waitingCount}</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Waiting</p>
+          </div>
+          <div className="bg-card card-outline rounded-xl p-3 text-center">
+            <Phone className="h-4 w-4 mx-auto text-success" />
+            <p className="text-xl font-bold text-foreground mt-1">{callingCount}</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Calling</p>
+          </div>
+          <div className="bg-card card-outline rounded-xl p-3 text-center">
+            <Clock className="h-4 w-4 mx-auto text-muted-foreground" />
+            <p className="text-xl font-bold text-foreground mt-1">~{waitingCount * business.avg_service_mins}m</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Wait</p>
+          </div>
+          <div className="bg-card card-outline rounded-xl p-3 text-center">
+            <CheckCircle2 className="h-4 w-4 mx-auto text-primary" />
+            <p className="text-xl font-bold text-foreground mt-1">{completedToday.length}</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Done</p>
+          </div>
+        </div>
+
+        {/* Queue capacity bar */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Queue capacity</span>
+            <span>{waitingCount + callingCount}/{maxQueue}</span>
+          </div>
+          <Progress value={((waitingCount + callingCount) / maxQueue) * 100} className="h-2" />
+        </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="w-full">
+            <TabsTrigger value="queue" className="flex-1">Live Queue</TabsTrigger>
+            <TabsTrigger value="history" className="flex-1">Today's History</TabsTrigger>
+            <TabsTrigger value="settings" className="flex-1">Settings</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="queue" className="mt-4 space-y-2">
+            {bookings.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No customers in queue</p>
+              </div>
+            ) : (
+              <AnimatePresence>
+                {bookings.map((b, i) => (
+                  <motion.div
+                    key={b.id}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -100 }}
+                    transition={{ delay: i * 0.03 }}
+                    className={`flex items-center justify-between p-4 bg-card card-outline rounded-xl ${
+                      b.status === 'calling' ? 'ring-2 ring-success/50' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg font-bold text-muted-foreground w-8">{b.position}.</span>
+                      <div>
+                        <h4 className="font-semibold text-card-foreground">
+                          {b.profiles?.full_name || 'Customer'}
+                        </h4>
+                        <p className="text-xs text-muted-foreground">
+                          {b.services?.name} • Token #{b.token_number}
+                          {b.status === 'calling' && (
+                            <span className="text-success font-medium ml-1">• Called</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => sendNotification(b.user_id, b.id)} title="Send reminder">
+                        <Bell className="h-3.5 w-3.5" />
+                      </Button>
+                      {b.status === 'waiting' && (
+                        <Button size="sm" onClick={() => callNext(b.id, b.user_id)}>Call</Button>
+                      )}
+                      {(b.status === 'calling' || b.status === 'in_progress') && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-destructive border-destructive/20 hover:bg-destructive/5"
+                            onClick={() => markNoShow(b.id, b.user_id)}
+                            title="No-show"
+                          >
+                            <UserX className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-success border-success/20 hover:bg-success/5"
+                            onClick={() => completeService(b.id, b.user_id)}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                            Done
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            )}
+          </TabsContent>
+
+          <TabsContent value="history" className="mt-4 space-y-2">
+            {completedToday.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No completed services today</p>
+              </div>
+            ) : (
+              completedToday.map(b => (
+                <div key={b.id} className="flex items-center justify-between p-3 bg-card card-outline rounded-xl">
+                  <div>
+                    <p className="text-sm font-medium text-card-foreground">{b.profiles?.full_name || 'Customer'}</p>
+                    <p className="text-xs text-muted-foreground">{b.services?.name} • Token #{b.token_number}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full ${
+                    b.status === 'completed' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+                  }`}>
+                    {b.status === 'completed' ? 'Completed' : 'No-show'}
+                  </span>
+                </div>
+              ))
+            )}
+          </TabsContent>
+
+          <TabsContent value="settings" className="mt-4 space-y-4">
+            {/* Add Service */}
+            <Dialog open={showAddService} onOpenChange={setShowAddService}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="w-full">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Service
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add Service</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={addService} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Service Name</Label>
+                    <Input value={serviceForm.name} onChange={e => setServiceForm(p => ({ ...p, name: e.target.value }))} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Duration (mins)</Label>
+                    <Input type="number" value={serviceForm.duration_mins} onChange={e => setServiceForm(p => ({ ...p, duration_mins: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Price ($)</Label>
+                    <Input type="number" step="0.01" value={serviceForm.price} onChange={e => setServiceForm(p => ({ ...p, price: e.target.value }))} />
+                  </div>
+                  <Button type="submit" className="w-full">Add Service</Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+
+            <div className="bg-card card-outline rounded-xl p-4 space-y-3">
+              <h3 className="text-sm font-medium text-foreground">Queue Settings</h3>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm text-muted-foreground">Max queue size</Label>
+                <span className="text-sm font-medium text-foreground">{maxQueue}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm text-muted-foreground">Avg service time</Label>
+                <span className="text-sm font-medium text-foreground">{business.avg_service_mins} min</span>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, MapPin, Clock, Users, ChevronRight, Loader2, LogIn } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +15,8 @@ interface BusinessWithQueue {
   address: string | null;
   avg_service_mins: number;
   is_open: boolean;
+  is_queue_paused: boolean;
+  max_queue_size: number;
   queue_count: number;
   estimated_wait: number;
   services: { name: string; duration_mins: number; price: number | null }[];
@@ -68,6 +71,8 @@ export default function PublicHome() {
           ]);
           return {
             ...biz,
+            is_queue_paused: false,
+            max_queue_size: 50,
             queue_count: countRes.count || 0,
             estimated_wait: (countRes.count || 0) * biz.avg_service_mins,
             services: svcRes.data || [],
@@ -90,10 +95,6 @@ export default function PublicHome() {
     b.name.toLowerCase().includes(search.toLowerCase()) ||
     (b.category && b.category.toLowerCase().includes(search.toLowerCase()))
   );
-
-  const handleBusinessClick = (bizId: string) => {
-    navigate(`/business/${bizId}`);
-  };
 
   return (
     <div className="min-h-screen bg-background pb-8">
@@ -143,13 +144,15 @@ export default function PublicHome() {
           </h3>
 
           {loading ? (
-            <div className="flex justify-center py-12">
+            <div className="flex flex-col items-center justify-center py-12 gap-2">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">Loading businesses...</p>
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <MapPin className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No businesses found</p>
+              <p className="text-xs mt-1">Try a different search term</p>
             </div>
           ) : (
             <AnimatePresence>
@@ -161,7 +164,7 @@ export default function PublicHome() {
                   transition={{ delay: i * 0.03 }}
                 >
                   <button
-                    onClick={() => handleBusinessClick(biz.id)}
+                    onClick={() => navigate(`/business/${biz.id}`)}
                     className="w-full text-left p-4 bg-card card-outline rounded-xl hover:shadow-md transition-all group"
                   >
                     <div className="flex items-start justify-between">
@@ -187,12 +190,19 @@ export default function PublicHome() {
                             <Clock className="h-3 w-3" />
                             ~{biz.estimated_wait} min
                           </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            Avg: {biz.avg_service_mins}m
+                          </span>
                         </div>
+                        {/* Mini queue bar */}
+                        <Progress value={(biz.queue_count / biz.max_queue_size) * 100} className="h-1" />
                         {biz.services.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {biz.services.map((svc, idx) => (
                               <span key={idx} className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                                 {svc.name}
+                                {svc.price ? ` • $${Number(svc.price).toFixed(0)}` : ''}
                               </span>
                             ))}
                           </div>
