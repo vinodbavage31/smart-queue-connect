@@ -184,7 +184,7 @@ export default function CustomerHome() {
       {/* Bottom Nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border/50 z-20">
         <div className="max-w-lg mx-auto flex">
-          <button onClick={() => navigate('/')} className="flex-1 py-3 flex flex-col items-center gap-1 text-primary">
+          <button onClick={() => navigate('/home')} className="flex-1 py-3 flex flex-col items-center gap-1 text-primary">
             <MapPin className="h-5 w-5" />
             <span className="text-[10px] font-medium">Explore</span>
           </button>

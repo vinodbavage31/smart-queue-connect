@@ -5,12 +5,14 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import AuthPage from "./pages/AuthPage";
+import PublicHome from "./pages/PublicHome";
 import CustomerHome from "./pages/CustomerHome";
 import BusinessDetail from "./pages/BusinessDetail";
 import MyBookings from "./pages/MyBookings";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
 import OwnerDashboard from "./pages/OwnerDashboard";
+import AdminDashboard from "./pages/AdminDashboard";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -38,18 +40,27 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
-      <Route path="/" element={
+      {/* Public landing page */}
+      <Route path="/" element={<PublicHome />} />
+
+      <Route path="/auth" element={user ? <Navigate to="/home" replace /> : <AuthPage />} />
+
+      {/* Authenticated home - role-based */}
+      <Route path="/home" element={
         <ProtectedRoute>
-          {roles.includes('owner') ? <OwnerDashboard /> : <CustomerHome />}
+          {roles.includes('admin') ? <AdminDashboard /> :
+           roles.includes('owner') ? <OwnerDashboard /> :
+           <CustomerHome />}
         </ProtectedRoute>
+      } />
+
+      <Route path="/admin" element={
+        <ProtectedRoute><AdminDashboard /></ProtectedRoute>
       } />
       <Route path="/dashboard" element={
         <ProtectedRoute><OwnerDashboard /></ProtectedRoute>
       } />
-      <Route path="/business/:id" element={
-        <ProtectedRoute><BusinessDetail /></ProtectedRoute>
-      } />
+      <Route path="/business/:id" element={<BusinessDetail />} />
       <Route path="/my-bookings" element={
         <ProtectedRoute><MyBookings /></ProtectedRoute>
       } />

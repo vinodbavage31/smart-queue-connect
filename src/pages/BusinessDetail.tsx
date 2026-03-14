@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Clock, Users, MapPin, Loader2, Check } from 'lucide-react';
+import { ArrowLeft, Clock, Users, MapPin, Loader2, Check, LogIn } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import type { Tables } from '@/integrations/supabase/types';
 
@@ -44,11 +44,16 @@ export default function BusinessDetail() {
   };
 
   const handleJoinQueue = async () => {
-    if (!selectedService || !user || !business) return;
+    // If not authenticated, redirect to auth with return URL
+    if (!user) {
+      navigate(`/auth?redirect=/business/${id}`);
+      return;
+    }
+
+    if (!selectedService || !business) return;
     setJoining(true);
 
     try {
-      // Get next token number for today
       const today = new Date().toISOString().split('T')[0];
       const { data: lastToken } = await supabase
         .from('bookings')
@@ -61,7 +66,6 @@ export default function BusinessDetail() {
 
       const nextToken = (lastToken?.token_number || 0) + 1;
 
-      // Get current waiting count for position
       const { count } = await supabase
         .from('bookings')
         .select('*', { count: 'exact', head: true })
@@ -81,7 +85,6 @@ export default function BusinessDetail() {
 
       if (error) throw error;
 
-      // Create confirmation notification
       await supabase.from('notifications').insert({
         user_id: user.id,
         title: 'Queue Joined!',
@@ -231,16 +234,24 @@ export default function BusinessDetail() {
               </div>
             )}
 
-            <Button
-              onClick={handleJoinQueue}
-              disabled={!selectedService || joining}
-              className="w-full h-12 text-base font-semibold"
-            >
-              {joining ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : null}
-              Join Queue
-            </Button>
+            {!user ? (
+              <Button
+                onClick={() => navigate(`/auth?redirect=/business/${id}`)}
+                className="w-full h-12 text-base font-semibold"
+              >
+                <LogIn className="mr-2 h-4 w-4" />
+                Sign In to Join Queue
+              </Button>
+            ) : (
+              <Button
+                onClick={handleJoinQueue}
+                disabled={!selectedService || joining}
+                className="w-full h-12 text-base font-semibold"
+              >
+                {joining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Join Queue
+              </Button>
+            )}
           </div>
         )}
 

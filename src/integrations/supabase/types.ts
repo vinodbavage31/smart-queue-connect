@@ -87,6 +87,7 @@ export type Database = {
           open_time: string | null
           owner_id: string
           phone: string | null
+          status: Database["public"]["Enums"]["business_status"]
           updated_at: string
         }
         Insert: {
@@ -104,6 +105,7 @@ export type Database = {
           open_time?: string | null
           owner_id: string
           phone?: string | null
+          status?: Database["public"]["Enums"]["business_status"]
           updated_at?: string
         }
         Update: {
@@ -121,6 +123,7 @@ export type Database = {
           open_time?: string | null
           owner_id?: string
           phone?: string | null
+          status?: Database["public"]["Enums"]["business_status"]
           updated_at?: string
         }
         Relationships: []
@@ -277,6 +280,7 @@ export type Database = {
         | "completed"
         | "cancelled"
         | "no_show"
+      business_status: "pending" | "approved" | "rejected"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -413,6 +417,7 @@ export const Constants = {
         "cancelled",
         "no_show",
       ],
+      business_status: ["pending", "approved", "rejected"],
     },
   },
 } as const
