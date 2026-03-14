@@ -161,7 +161,7 @@ export default function AdminDashboard() {
                           </p>
                         )}
                         <p className="text-xs text-muted-foreground">
-                          Owner: {biz.profiles?.full_name || 'Unknown'}
+                          Owner: {biz.owner_name}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
                           Registered: {new Date(biz.created_at).toLocaleDateString()}
