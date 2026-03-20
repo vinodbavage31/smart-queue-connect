@@ -3,14 +3,19 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, MapPin, Clock, Users, ChevronRight, Bell, User, Loader2 } from 'lucide-react';
+import { Search, MapPin, Clock, Users, ChevronRight, Bell, User, Loader2, Navigation } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { Tables } from '@/integrations/supabase/types';
 
-type Business = Tables<'businesses'>;
-
-interface BusinessWithQueue extends Business {
+interface BusinessWithQueue {
+  id: string;
+  name: string;
+  category: string | null;
+  address: string | null;
+  avg_service_mins: number;
+  is_open: boolean;
+  is_queue_paused: boolean | null;
   queue_count: number;
   estimated_wait: number;
 }
@@ -26,13 +31,17 @@ export default function CustomerHome() {
   useEffect(() => {
     fetchBusinesses();
     fetchUnreadNotifications();
+
+    // Poll for unread notifications
+    const interval = setInterval(fetchUnreadNotifications, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchBusinesses = async () => {
     setLoading(true);
     const { data: bizData } = await supabase
       .from('businesses')
-      .select('*')
+      .select('id, name, category, address, avg_service_mins, is_open, is_queue_paused')
       .eq('is_open', true);
 
     if (bizData) {
@@ -72,19 +81,13 @@ export default function CustomerHome() {
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      {/* Header */}
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-lg border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <h1 className="text-lg font-bold text-foreground">
             Smart<span className="text-primary">Q</span>
           </h1>
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative"
-              onClick={() => navigate('/notifications')}
-            >
+            <Button variant="ghost" size="icon" className="relative" onClick={() => navigate('/notifications')}>
               <Bell className="h-5 w-5" />
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center font-medium">
@@ -92,11 +95,7 @@ export default function CustomerHome() {
                 </span>
               )}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigate('/profile')}
-            >
+            <Button variant="ghost" size="icon" onClick={() => navigate('/profile')}>
               <User className="h-5 w-5" />
             </Button>
           </div>
@@ -104,7 +103,6 @@ export default function CustomerHome() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 pt-4 space-y-4">
-        {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -115,10 +113,8 @@ export default function CustomerHome() {
           />
         </div>
 
-        {/* Active Booking Banner */}
         <ActiveBookingBanner />
 
-        {/* Business List */}
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
             Nearby Businesses
@@ -150,11 +146,12 @@ export default function CustomerHome() {
                       <div className="space-y-1 flex-1">
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold text-card-foreground">{biz.name}</h3>
-                          {biz.is_open && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-success bg-success/10 px-1.5 py-0.5 rounded-full">
-                              <span className="h-1.5 w-1.5 rounded-full bg-success pulse-live" />
-                              Open
-                            </span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-success bg-success/10 px-1.5 py-0.5 rounded-full">
+                            <span className="h-1.5 w-1.5 rounded-full bg-success pulse-live" />
+                            Open
+                          </span>
+                          {biz.is_queue_paused && (
+                            <Badge variant="outline" className="text-[10px] text-warning border-warning/30">Paused</Badge>
                           )}
                         </div>
                         {biz.category && (
@@ -181,7 +178,6 @@ export default function CustomerHome() {
         </div>
       </div>
 
-      {/* Bottom Nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border/50 z-20">
         <div className="max-w-lg mx-auto flex">
           <button onClick={() => navigate('/home')} className="flex-1 py-3 flex flex-col items-center gap-1 text-primary">
@@ -221,13 +217,26 @@ function ActiveBookingBanner() {
         .from('bookings')
         .select('*, businesses(name)')
         .eq('user_id', user.id)
-        .in('status', ['waiting', 'calling'])
+        .in('status', ['waiting', 'calling', 'in_progress'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       setBooking(data);
     };
     fetch();
+
+    // Realtime for active booking
+    const channel = supabase
+      .channel('active-booking-banner')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `user_id=eq.${user.id}`,
+      }, () => fetch())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
   if (!booking) return null;
@@ -241,13 +250,16 @@ function ActiveBookingBanner() {
     >
       <div className="flex justify-between items-start">
         <span className="text-xs font-medium opacity-80 uppercase tracking-wider">Your Token</span>
-        <span className="bg-primary-foreground/20 px-2 py-0.5 rounded text-[10px] font-medium">
-          {booking.status === 'calling' ? '🔔 Your Turn!' : 'Live'}
-        </span>
+        <Badge
+          variant="outline"
+          className={`text-[10px] border-primary-foreground/30 text-primary-foreground ${
+            booking.status === 'calling' ? 'animate-pulse' : ''
+          }`}
+        >
+          {booking.status === 'calling' ? '🔔 Your Turn!' : booking.status === 'in_progress' ? 'In Service' : 'Live'}
+        </Badge>
       </div>
-      <div className="token-number mt-1">
-        #{booking.token_number}
-      </div>
+      <div className="token-number mt-1">#{booking.token_number}</div>
       <div className="grid grid-cols-2 gap-4 pt-3 mt-3 border-t border-primary-foreground/10">
         <div>
           <p className="text-[10px] opacity-70">Position</p>

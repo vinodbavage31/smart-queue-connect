@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -6,16 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Users, Clock, Phone, CheckCircle2, Loader2, LogOut, Bell, Pause, Play, UserX, BarChart3 } from 'lucide-react';
+import { Plus, Users, Clock, Phone, CheckCircle2, Loader2, LogOut, Bell, Pause, Play, UserX, BarChart3, PlayCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -40,7 +37,7 @@ export default function OwnerDashboard() {
     fetchBusiness();
   }, [user]);
 
-  // Realtime subscription for bookings
+  // Realtime subscription for bookings — refetch on ANY change
   useEffect(() => {
     if (!business) return;
     const channel = supabase
@@ -56,7 +53,16 @@ export default function OwnerDashboard() {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Fallback polling every 5s for resilience
+    const interval = setInterval(() => {
+      fetchBookings(business.id);
+      fetchCompletedToday(business.id);
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
   }, [business?.id]);
 
   const fetchBusiness = async () => {
@@ -77,7 +83,7 @@ export default function OwnerDashboard() {
     setLoading(false);
   };
 
-  const fetchBookings = async (bizId: string) => {
+  const fetchBookings = useCallback(async (bizId: string) => {
     const { data } = await supabase
       .from('bookings')
       .select('*, profiles(full_name, phone), services(name)')
@@ -85,19 +91,19 @@ export default function OwnerDashboard() {
       .in('status', ['waiting', 'calling', 'in_progress'])
       .order('position', { ascending: true });
     setBookings(data || []);
-  };
+  }, []);
 
-  const fetchCompletedToday = async (bizId: string) => {
+  const fetchCompletedToday = useCallback(async (bizId: string) => {
     const today = new Date().toISOString().split('T')[0];
     const { data } = await supabase
       .from('bookings')
       .select('*, profiles(full_name), services(name)')
       .eq('business_id', bizId)
-      .in('status', ['completed', 'no_show'])
+      .in('status', ['completed', 'no_show', 'cancelled'])
       .gte('created_at', today)
       .order('completed_at', { ascending: false });
     setCompletedToday(data || []);
-  };
+  }, []);
 
   const createBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,6 +146,56 @@ export default function OwnerDashboard() {
     }
   };
 
+  // Recalculate positions for remaining waiting bookings
+  const recalcPositions = async (excludeId?: string) => {
+    const remaining = bookings
+      .filter(b => b.status === 'waiting' && b.id !== excludeId)
+      .sort((a, b) => a.position - b.position);
+    for (let i = 0; i < remaining.length; i++) {
+      if (remaining[i].position !== i + 1) {
+        await supabase.from('bookings').update({ position: i + 1 }).eq('id', remaining[i].id);
+      }
+    }
+    return remaining;
+  };
+
+  // Send proximity notifications for customers within 3 positions
+  const sendProximityNotifications = async (waitingList: any[]) => {
+    for (const b of waitingList.slice(0, 3)) {
+      const pos = waitingList.indexOf(b) + 1;
+      const estWait = pos * (business.avg_service_mins || 15);
+      await supabase.from('notifications').insert({
+        user_id: b.user_id,
+        title: pos === 1 ? "You're next!" : 'Almost your turn!',
+        message: `Position ${pos} at ${business.name}. Est. wait: ~${estWait} min.`,
+        type: 'reminder',
+        booking_id: b.id,
+      });
+    }
+  };
+
+  // Auto-call next waiting user
+  const autoCallNext = async (excludeId: string) => {
+    const callingOthers = bookings.filter(b => b.status === 'calling' && b.id !== excludeId);
+    if (callingOthers.length > 0) return;
+
+    const remaining = bookings
+      .filter(b => b.status === 'waiting' && b.id !== excludeId)
+      .sort((a, b) => a.position - b.position);
+    
+    if (remaining.length > 0) {
+      const next = remaining[0];
+      await supabase.from('bookings').update({ status: 'calling' }).eq('id', next.id);
+      await supabase.from('notifications').insert({
+        user_id: next.user_id,
+        title: "You are next! Please arrive in 10 minutes",
+        message: `You're being called at ${business.name}. Please proceed to the counter within 10 minutes or your slot may be skipped.`,
+        type: 'calling',
+        booking_id: next.id,
+      });
+    }
+  };
+
   const callNext = async (bookingId: string, userId: string) => {
     const { error } = await supabase
       .from('bookings')
@@ -148,12 +204,29 @@ export default function OwnerDashboard() {
     if (!error) {
       await supabase.from('notifications').insert({
         user_id: userId,
-        title: "It's your turn!",
-        message: `You're being called at ${business.name}. Please proceed to the counter.`,
+        title: "You are next! Please arrive in 10 minutes",
+        message: `You're being called at ${business.name}. Please proceed to the counter within 10 minutes or your slot may be skipped.`,
         type: 'calling',
         booking_id: bookingId,
       });
       toast({ title: 'Customer called!' });
+    }
+  };
+
+  const startService = async (bookingId: string, userId: string) => {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ status: 'in_progress' })
+      .eq('id', bookingId);
+    if (!error) {
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        title: 'Service started',
+        message: `Your service at ${business.name} has begun.`,
+        type: 'info',
+        booking_id: bookingId,
+      });
+      toast({ title: 'Service started!' });
     }
   };
 
@@ -164,48 +237,9 @@ export default function OwnerDashboard() {
       .eq('id', bookingId);
 
     if (!error) {
-      // Recalculate positions for remaining waiting bookings
-      const waitingBookings = bookings
-        .filter(b => b.status === 'waiting')
-        .sort((a, b) => a.position - b.position);
-      
-      for (let i = 0; i < waitingBookings.length; i++) {
-        await supabase
-          .from('bookings')
-          .update({ position: i + 1 })
-          .eq('id', waitingBookings[i].id);
-      }
-
-      // Auto-call next if no one is currently being called
-      const callingBookings = bookings.filter(b => b.status === 'calling' && b.id !== bookingId);
-      if (callingBookings.length === 0 && waitingBookings.length > 0) {
-        const nextInLine = waitingBookings[0];
-        await supabase
-          .from('bookings')
-          .update({ status: 'calling' })
-          .eq('id', nextInLine.id);
-        
-        await supabase.from('notifications').insert({
-          user_id: nextInLine.user_id,
-          title: "It's your turn!",
-          message: `You're being called at ${business.name}. Please proceed now.`,
-          type: 'calling',
-          booking_id: nextInLine.id,
-        });
-      }
-
-      // Notify customers within 3 positions
-      for (const b of waitingBookings.slice(0, 3)) {
-        const estWait = (waitingBookings.indexOf(b)) * (business.avg_service_mins || 15);
-        await supabase.from('notifications').insert({
-          user_id: b.user_id,
-          title: 'Almost your turn!',
-          message: `You're position ${waitingBookings.indexOf(b) + 1} at ${business.name}. Est. wait: ~${estWait} min.`,
-          type: 'reminder',
-          booking_id: b.id,
-        });
-      }
-
+      const remaining = await recalcPositions(bookingId);
+      await autoCallNext(bookingId);
+      await sendProximityNotifications(remaining);
       toast({ title: 'Service completed!' });
     }
   };
@@ -215,27 +249,20 @@ export default function OwnerDashboard() {
       .from('bookings')
       .update({ status: 'no_show', completed_at: new Date().toISOString() })
       .eq('id', bookingId);
-    
+
     if (!error) {
-      // Recalculate positions
-      const waitingBookings = bookings
-        .filter(b => b.status === 'waiting')
-        .sort((a, b) => a.position - b.position);
-      for (let i = 0; i < waitingBookings.length; i++) {
-        await supabase
-          .from('bookings')
-          .update({ position: i + 1 })
-          .eq('id', waitingBookings[i].id);
-      }
+      const remaining = await recalcPositions(bookingId);
+      await autoCallNext(bookingId);
+      await sendProximityNotifications(remaining);
 
       await supabase.from('notifications').insert({
         user_id: userId,
-        title: 'Marked as No-Show',
-        message: `You were marked as no-show at ${business.name}. You can rejoin the queue if needed.`,
+        title: 'Your slot was skipped',
+        message: `You were skipped at ${business.name} due to delay. You can rejoin the queue if needed.`,
         type: 'info',
         booking_id: bookingId,
       });
-      toast({ title: 'Marked as no-show' });
+      toast({ title: 'Marked as no-show, next customer called' });
     }
   };
 
@@ -254,12 +281,12 @@ export default function OwnerDashboard() {
   const sendNotification = async (userId: string, bookingId: string) => {
     await supabase.from('notifications').insert({
       user_id: userId,
-      title: 'Update from ' + business.name,
-      message: 'Please be ready, your turn is approaching soon.',
+      title: 'Please arrive or your slot may be skipped',
+      message: `Reminder from ${business.name}: please be ready, your turn is approaching soon. If you don't arrive, your slot may be skipped.`,
       type: 'reminder',
       booking_id: bookingId,
     });
-    toast({ title: 'Notification sent!' });
+    toast({ title: 'Reminder sent!' });
   };
 
   if (loading) {
@@ -315,7 +342,17 @@ export default function OwnerDashboard() {
 
   const waitingCount = bookings.filter(b => b.status === 'waiting').length;
   const callingCount = bookings.filter(b => b.status === 'calling').length;
+  const inProgressCount = bookings.filter(b => b.status === 'in_progress').length;
   const maxQueue = business.max_queue_size || 50;
+
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case 'waiting': return <Badge variant="outline" className="text-warning border-warning/30 bg-warning/10 text-[10px]">Waiting</Badge>;
+      case 'calling': return <Badge variant="outline" className="text-success border-success/30 bg-success/10 text-[10px] animate-pulse">Called</Badge>;
+      case 'in_progress': return <Badge variant="outline" className="text-primary border-primary/30 bg-primary/10 text-[10px]">In Service</Badge>;
+      default: return null;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -324,7 +361,7 @@ export default function OwnerDashboard() {
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="font-bold text-foreground">{business.name}</h1>
-            <p className="text-xs text-muted-foreground">Dashboard</p>
+            <p className="text-xs text-muted-foreground">Dashboard • Live</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" onClick={() => signOut().then(() => navigate('/auth'))}>
@@ -365,7 +402,7 @@ export default function OwnerDashboard() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           <div className="bg-card card-outline rounded-xl p-3 text-center">
             <Users className="h-4 w-4 mx-auto text-muted-foreground" />
             <p className="text-xl font-bold text-foreground mt-1">{waitingCount}</p>
@@ -374,7 +411,12 @@ export default function OwnerDashboard() {
           <div className="bg-card card-outline rounded-xl p-3 text-center">
             <Phone className="h-4 w-4 mx-auto text-success" />
             <p className="text-xl font-bold text-foreground mt-1">{callingCount}</p>
-            <p className="text-[10px] text-muted-foreground uppercase">Calling</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Called</p>
+          </div>
+          <div className="bg-card card-outline rounded-xl p-3 text-center">
+            <PlayCircle className="h-4 w-4 mx-auto text-primary" />
+            <p className="text-xl font-bold text-foreground mt-1">{inProgressCount}</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Serving</p>
           </div>
           <div className="bg-card card-outline rounded-xl p-3 text-center">
             <Clock className="h-4 w-4 mx-auto text-muted-foreground" />
@@ -392,15 +434,15 @@ export default function OwnerDashboard() {
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Queue capacity</span>
-            <span>{waitingCount + callingCount}/{maxQueue}</span>
+            <span>{waitingCount + callingCount + inProgressCount}/{maxQueue}</span>
           </div>
-          <Progress value={((waitingCount + callingCount) / maxQueue) * 100} className="h-2" />
+          <Progress value={((waitingCount + callingCount + inProgressCount) / maxQueue) * 100} className="h-2" />
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full">
-            <TabsTrigger value="queue" className="flex-1">Live Queue</TabsTrigger>
-            <TabsTrigger value="history" className="flex-1">Today's History</TabsTrigger>
+            <TabsTrigger value="queue" className="flex-1">Live Queue ({bookings.length})</TabsTrigger>
+            <TabsTrigger value="history" className="flex-1">Today ({completedToday.length})</TabsTrigger>
             <TabsTrigger value="settings" className="flex-1">Settings</TabsTrigger>
           </TabsList>
 
@@ -421,20 +463,21 @@ export default function OwnerDashboard() {
                     exit={{ opacity: 0, x: -100 }}
                     transition={{ delay: i * 0.03 }}
                     className={`flex items-center justify-between p-4 bg-card card-outline rounded-xl ${
-                      b.status === 'calling' ? 'ring-2 ring-success/50' : ''
+                      b.status === 'calling' ? 'ring-2 ring-success/50' :
+                      b.status === 'in_progress' ? 'ring-2 ring-primary/50' : ''
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-lg font-bold text-muted-foreground w-8">{b.position}.</span>
                       <div>
-                        <h4 className="font-semibold text-card-foreground">
-                          {b.profiles?.full_name || 'Customer'}
-                        </h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-card-foreground">
+                            {b.profiles?.full_name || 'Customer'}
+                          </h4>
+                          {statusBadge(b.status)}
+                        </div>
                         <p className="text-xs text-muted-foreground">
                           {b.services?.name} • Token #{b.token_number}
-                          {b.status === 'calling' && (
-                            <span className="text-success font-medium ml-1">• Called</span>
-                          )}
                         </p>
                       </div>
                     </div>
@@ -445,14 +488,35 @@ export default function OwnerDashboard() {
                       {b.status === 'waiting' && (
                         <Button size="sm" onClick={() => callNext(b.id, b.user_id)}>Call</Button>
                       )}
-                      {(b.status === 'calling' || b.status === 'in_progress') && (
+                      {b.status === 'calling' && (
+                        <>
+                          <Button
+                            size="sm"
+                            className="bg-primary text-primary-foreground hover:bg-primary/90"
+                            onClick={() => startService(b.id, b.user_id)}
+                          >
+                            <PlayCircle className="h-3.5 w-3.5 mr-1" />
+                            Start
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-destructive border-destructive/20 hover:bg-destructive/5"
+                            onClick={() => markNoShow(b.id, b.user_id)}
+                            title="Skip / No-show"
+                          >
+                            <UserX className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                      {b.status === 'in_progress' && (
                         <>
                           <Button
                             size="sm"
                             variant="outline"
                             className="text-destructive border-destructive/20 hover:bg-destructive/5"
                             onClick={() => markNoShow(b.id, b.user_id)}
-                            title="No-show"
+                            title="Skip"
                           >
                             <UserX className="h-3.5 w-3.5" />
                           </Button>
@@ -488,9 +552,11 @@ export default function OwnerDashboard() {
                     <p className="text-xs text-muted-foreground">{b.services?.name} • Token #{b.token_number}</p>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full ${
-                    b.status === 'completed' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+                    b.status === 'completed' ? 'bg-success/10 text-success' :
+                    b.status === 'cancelled' ? 'bg-muted text-muted-foreground' :
+                    'bg-destructive/10 text-destructive'
                   }`}>
-                    {b.status === 'completed' ? 'Completed' : 'No-show'}
+                    {b.status === 'completed' ? 'Completed' : b.status === 'cancelled' ? 'Cancelled' : 'No-show'}
                   </span>
                 </div>
               ))
@@ -498,7 +564,6 @@ export default function OwnerDashboard() {
           </TabsContent>
 
           <TabsContent value="settings" className="mt-4 space-y-4">
-            {/* Add Service */}
             <Dialog open={showAddService} onOpenChange={setShowAddService}>
               <DialogTrigger asChild>
                 <Button variant="outline" className="w-full">
