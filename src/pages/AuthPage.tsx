@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,10 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
+
+  const redirectTo = searchParams.get('redirect') || '/home';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,13 +30,20 @@ export default function AuthPage() {
     try {
       if (isLogin) {
         await signIn(email, password);
-        navigate('/');
+        navigate(redirectTo);
       } else {
         await signUp(email, password, fullName, role);
         toast({
           title: 'Account created!',
-          description: 'Please check your email to verify your account.',
+          description: 'You can now sign in.',
         });
+        // Auto sign in after signup
+        try {
+          await signIn(email, password);
+          navigate(redirectTo);
+        } catch {
+          setIsLogin(true);
+        }
       }
     } catch (err: any) {
       toast({
@@ -75,7 +85,6 @@ export default function AuthPage() {
                   required
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>I am a</Label>
                 <div className="grid grid-cols-2 gap-2">
