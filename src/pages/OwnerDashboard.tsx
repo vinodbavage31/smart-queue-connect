@@ -40,30 +40,37 @@ export default function OwnerDashboard() {
   // Realtime subscription for bookings — refetch on ANY change
   useEffect(() => {
     if (!business) return;
+    const bizId = business.id;
+    console.log('[OwnerDashboard] Setting up realtime for business:', bizId);
+
     const channel = supabase
-      .channel(`owner-queue-${business.id}`)
+      .channel(`owner-queue-${bizId}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'bookings',
-        filter: `business_id=eq.${business.id}`,
-      }, () => {
-        fetchBookings(business.id);
-        fetchCompletedToday(business.id);
+        filter: `business_id=eq.${bizId}`,
+      }, (payload) => {
+        console.log('[OwnerDashboard] Realtime event received:', payload.eventType, payload);
+        fetchBookings(bizId);
+        fetchCompletedToday(bizId);
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[OwnerDashboard] Subscription status:', status);
+      });
 
-    // Fallback polling every 5s for resilience
+    // Fallback polling every 3s for resilience
     const interval = setInterval(() => {
-      fetchBookings(business.id);
-      fetchCompletedToday(business.id);
-    }, 5000);
+      fetchBookings(bizId);
+      fetchCompletedToday(bizId);
+    }, 3000);
 
     return () => {
+      console.log('[OwnerDashboard] Cleaning up realtime for business:', bizId);
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [business?.id]);
+  }, [business?.id, fetchBookings, fetchCompletedToday]);
 
   const fetchBusiness = async () => {
     if (!user) return;
