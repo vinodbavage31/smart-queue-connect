@@ -9,7 +9,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Clock, Users, MapPin, Loader2, Check, LogIn, AlertCircle, Navigation } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import type { Tables } from '@/integrations/supabase/types';
+import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 
 type Service = Tables<'services'>;
 type Business = Tables<'businesses'>;
@@ -150,7 +150,7 @@ export default function BusinessDetail() {
 
       const position = (count || 0) + 1;
 
-      const bookingPayload = {
+      const bookingPayload: TablesInsert<'bookings'> = {
         user_id: user.id,
         business_id: business.id,
         service_id: selectedService,
