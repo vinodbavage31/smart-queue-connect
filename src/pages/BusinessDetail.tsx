@@ -150,14 +150,20 @@ export default function BusinessDetail() {
 
       const position = (count || 0) + 1;
 
-      const { error } = await supabase.from('bookings').insert({
+      const bookingPayload = {
         user_id: user.id,
         business_id: business.id,
         service_id: selectedService,
         token_number: nextToken,
         position: position,
         status: 'waiting',
-      });
+      };
+
+      const { data: insertedBooking, error } = await supabase
+        .from('bookings')
+        .insert(bookingPayload)
+        .select('id, business_id, status, token_number, position')
+        .single();
 
       if (error) {
         if (error.code === '23505') {
@@ -169,6 +175,8 @@ export default function BusinessDetail() {
         setJoining(false);
         return;
       }
+
+      console.log('[BusinessDetail] Booking created', insertedBooking);
 
       await supabase.from('notifications').insert({
         user_id: user.id,
@@ -191,7 +199,7 @@ export default function BusinessDetail() {
       setTokenInfo({ token: nextToken, position, status: 'waiting' });
       setJoined(true);
       setHasActiveBooking(true);
-      setQueueCount(prev => prev + 1);
+      await Promise.all([refreshQueueCount(), refreshUserBooking()]);
 
       toast({ title: 'Queue joined!', description: `Your token number is #${nextToken}` });
     } catch (err: any) {

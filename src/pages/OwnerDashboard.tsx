@@ -65,6 +65,33 @@ export default function OwnerDashboard() {
     }));
   }, []);
 
+  const attachProfiles = useCallback(async (rows: Array<Tables<'bookings'> & { services?: { name: string | null } | null }>) => {
+    const userIds = Array.from(new Set(rows.map(row => row.user_id).filter(Boolean)));
+
+    if (userIds.length === 0) {
+      return rows.map(row => ({ ...row, profiles: null })) as QueueBooking[];
+    }
+
+    const { data: profilesData, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone')
+      .in('id', userIds);
+
+    if (error) {
+      console.error('[OwnerDashboard] Failed to fetch profiles for queue rows', error);
+      return rows.map(row => ({ ...row, profiles: null })) as QueueBooking[];
+    }
+
+    const profileMap = new Map(
+      (profilesData ?? []).map(profile => [profile.id, { full_name: profile.full_name, phone: profile.phone }])
+    );
+
+    return rows.map(row => ({
+      ...row,
+      profiles: profileMap.get(row.user_id) ?? null,
+    })) as QueueBooking[];
+  }, []);
+
   const fetchDashboardData = useCallback(async (bizId: string, source: string) => {
     if (!user || !bizId) return;
 
@@ -82,13 +109,13 @@ export default function OwnerDashboard() {
         .maybeSingle(),
       supabase
         .from('bookings')
-        .select('*, profiles(full_name, phone), services(name)')
+        .select('*, services(name)')
         .eq('business_id', bizId)
         .in('status', ['waiting', 'calling', 'in_progress'])
         .order('position', { ascending: true }),
       supabase
         .from('bookings')
-        .select('*, profiles(full_name, phone), services(name)')
+        .select('*, services(name)')
         .eq('business_id', bizId)
         .in('status', ['completed', 'no_show', 'cancelled'])
         .gte('created_at', startOfToday.toISOString())
@@ -106,8 +133,8 @@ export default function OwnerDashboard() {
     }
 
     const nextBusiness = bizRes.data ?? null;
-    const nextBookings = (activeRes.data ?? []) as QueueBooking[];
-    const nextCompleted = (historyRes.data ?? []) as QueueBooking[];
+    const nextBookings = await attachProfiles(activeRes.data ?? []);
+    const nextCompleted = await attachProfiles(historyRes.data ?? []);
 
     setBusiness(nextBusiness);
     setBookings([...nextBookings]);
@@ -123,7 +150,7 @@ export default function OwnerDashboard() {
       activeBookings: nextBookings.length,
       completedToday: nextCompleted.length,
     });
-  }, [updateDebugState, user]);
+  }, [attachProfiles, updateDebugState, user]);
 
   const fetchOwnedBusinesses = useCallback(async () => {
     if (!user) return [] as Business[];
