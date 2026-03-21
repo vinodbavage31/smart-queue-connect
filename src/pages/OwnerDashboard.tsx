@@ -70,7 +70,7 @@ export default function OwnerDashboard() {
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [business?.id, fetchBookings, fetchCompletedToday]);
+  }, [business?.id]); // fetchBookings/fetchCompletedToday are stable useCallbacks defined below
 
   const fetchBusiness = async () => {
     if (!user) return;
