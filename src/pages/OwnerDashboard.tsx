@@ -7,22 +7,40 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Users, Clock, Phone, CheckCircle2, Loader2, LogOut, Bell, Pause, Play, UserX, BarChart3, PlayCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import type { Tables } from '@/integrations/supabase/types';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+type Business = Tables<'businesses'>;
+type QueueBooking = Tables<'bookings'> & {
+  profiles?: { full_name: string | null; phone: string | null } | null;
+  services?: { name: string | null } | null;
+};
+
+const DASHBOARD_POLL_MS = 2000;
+
 export default function OwnerDashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [business, setBusiness] = useState<any>(null);
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [completedToday, setCompletedToday] = useState<any[]>([]);
+  const [ownedBusinesses, setOwnedBusinesses] = useState<Business[]>([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  const [business, setBusiness] = useState<Business | null>(null);
+  const [bookings, setBookings] = useState<QueueBooking[]>([]);
+  const [completedToday, setCompletedToday] = useState<QueueBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSetup, setShowSetup] = useState(false);
   const [setupForm, setSetupForm] = useState({
@@ -32,85 +50,235 @@ export default function OwnerDashboard() {
   const [showAddService, setShowAddService] = useState(false);
   const [serviceForm, setServiceForm] = useState({ name: '', duration_mins: '15', price: '' });
   const [activeTab, setActiveTab] = useState('queue');
+  const [debugState, setDebugState] = useState({
+    subscriptionStatus: 'idle',
+    lastEventType: 'init',
+    lastUpdatedAt: '—',
+    totalBookingsFetched: 0,
+  });
 
-  useEffect(() => {
-    fetchBusiness();
-  }, [user]);
+  const updateDebugState = useCallback((updates: Partial<typeof debugState>) => {
+    setDebugState(prev => ({
+      ...prev,
+      ...updates,
+      lastUpdatedAt: new Date().toLocaleTimeString(),
+    }));
+  }, []);
 
-  // Realtime subscription for bookings — refetch on ANY change
-  useEffect(() => {
-    if (!business) return;
-    const bizId = business.id;
-    console.log('[OwnerDashboard] Setting up realtime for business:', bizId);
+  const fetchDashboardData = useCallback(async (bizId: string, source: string) => {
+    if (!user || !bizId) return;
 
-    const channel = supabase
-      .channel(`owner-queue-${bizId}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'bookings',
-        filter: `business_id=eq.${bizId}`,
-      }, (payload) => {
-        console.log('[OwnerDashboard] Realtime event received:', payload.eventType, payload);
-        fetchBookings(bizId);
-        fetchCompletedToday(bizId);
-      })
-      .subscribe((status) => {
-        console.log('[OwnerDashboard] Subscription status:', status);
+    console.log('[OwnerDashboard] Refetch start', { source, businessId: bizId });
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [bizRes, activeRes, historyRes] = await Promise.all([
+      supabase
+        .from('businesses')
+        .select('*')
+        .eq('id', bizId)
+        .eq('owner_id', user.id)
+        .maybeSingle(),
+      supabase
+        .from('bookings')
+        .select('*, profiles(full_name, phone), services(name)')
+        .eq('business_id', bizId)
+        .in('status', ['waiting', 'calling', 'in_progress'])
+        .order('position', { ascending: true }),
+      supabase
+        .from('bookings')
+        .select('*, profiles(full_name, phone), services(name)')
+        .eq('business_id', bizId)
+        .in('status', ['completed', 'no_show', 'cancelled'])
+        .gte('created_at', startOfToday.toISOString())
+        .order('completed_at', { ascending: false }),
+    ]);
+
+    if (bizRes.error || activeRes.error || historyRes.error) {
+      console.error('[OwnerDashboard] Refetch failed', {
+        source,
+        businessError: bizRes.error,
+        activeError: activeRes.error,
+        historyError: historyRes.error,
       });
+      return;
+    }
 
-    // Fallback polling every 3s for resilience
-    const interval = setInterval(() => {
-      fetchBookings(bizId);
-      fetchCompletedToday(bizId);
-    }, 3000);
+    const nextBusiness = bizRes.data ?? null;
+    const nextBookings = (activeRes.data ?? []) as QueueBooking[];
+    const nextCompleted = (historyRes.data ?? []) as QueueBooking[];
 
-    return () => {
-      console.log('[OwnerDashboard] Cleaning up realtime for business:', bizId);
-      supabase.removeChannel(channel);
-      clearInterval(interval);
-    };
-  }, [business?.id]); // fetchBookings/fetchCompletedToday are stable useCallbacks defined below
+    setBusiness(nextBusiness);
+    setBookings([...nextBookings]);
+    setCompletedToday([...nextCompleted]);
+    updateDebugState({
+      lastEventType: source,
+      totalBookingsFetched: nextBookings.length,
+    });
 
-  const fetchBusiness = async () => {
-    if (!user) return;
-    setLoading(true);
-    const { data: biz } = await supabase
+    console.log('[OwnerDashboard] Refetch complete', {
+      source,
+      businessId: bizId,
+      activeBookings: nextBookings.length,
+      completedToday: nextCompleted.length,
+    });
+  }, [updateDebugState, user]);
+
+  const fetchOwnedBusinesses = useCallback(async () => {
+    if (!user) return [] as Business[];
+
+    const { data, error } = await supabase
       .from('businesses')
       .select('*')
       .eq('owner_id', user.id)
-      .maybeSingle();
+      .order('status', { ascending: true })
+      .order('created_at', { ascending: false });
 
-    if (biz) {
-      setBusiness(biz);
-      await Promise.all([fetchBookings(biz.id), fetchCompletedToday(biz.id)]);
-    } else {
-      setShowSetup(true);
+    if (error) {
+      console.error('[OwnerDashboard] Failed to fetch owned businesses', error);
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      return [] as Business[];
     }
-    setLoading(false);
-  };
 
-  const fetchBookings = useCallback(async (bizId: string) => {
-    const { data } = await supabase
-      .from('bookings')
-      .select('*, profiles(full_name, phone), services(name)')
-      .eq('business_id', bizId)
-      .in('status', ['waiting', 'calling', 'in_progress'])
-      .order('position', { ascending: true });
-    setBookings(data || []);
-  }, []);
+    const results = (data ?? []) as Business[];
+    setOwnedBusinesses(results);
+    return results;
+  }, [toast, user]);
 
-  const fetchCompletedToday = useCallback(async (bizId: string) => {
-    const today = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
-      .from('bookings')
-      .select('*, profiles(full_name), services(name)')
-      .eq('business_id', bizId)
-      .in('status', ['completed', 'no_show', 'cancelled'])
-      .gte('created_at', today)
-      .order('completed_at', { ascending: false });
-    setCompletedToday(data || []);
-  }, []);
+  const getDefaultBusinessId = useCallback((items: Business[]) => {
+    if (!user || items.length === 0) return '';
+
+    const storageKey = `smartq-owner-business:${user.id}`;
+    const savedBusinessId = window.localStorage.getItem(storageKey);
+
+    if (savedBusinessId && items.some(item => item.id === savedBusinessId)) {
+      return savedBusinessId;
+    }
+
+    return items.find(item => item.status === 'approved')?.id ?? items[0].id;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      setLoading(true);
+      const businesses = await fetchOwnedBusinesses();
+
+      if (cancelled) return;
+
+      if (businesses.length === 0) {
+        setShowSetup(true);
+        setBusiness(null);
+        setBookings([]);
+        setCompletedToday([]);
+        setSelectedBusinessId('');
+        setLoading(false);
+        return;
+      }
+
+      setShowSetup(false);
+      const initialBusinessId = getDefaultBusinessId(businesses);
+      setSelectedBusinessId(initialBusinessId);
+      setLoading(false);
+    };
+
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchOwnedBusinesses, getDefaultBusinessId, user]);
+
+  useEffect(() => {
+    if (!user || !selectedBusinessId) return;
+
+    window.localStorage.setItem(`smartq-owner-business:${user.id}`, selectedBusinessId);
+    void fetchDashboardData(selectedBusinessId, 'business:selected');
+  }, [fetchDashboardData, selectedBusinessId, user]);
+
+  useEffect(() => {
+    if (!selectedBusinessId) return;
+
+    const businessId = selectedBusinessId;
+    let isActive = true;
+
+    console.log('[OwnerDashboard] Setting up booking subscription', { businessId });
+    updateDebugState({
+      subscriptionStatus: 'connecting',
+      lastEventType: 'subscription:connecting',
+    });
+
+    const channel = supabase
+      .channel(`owner-bookings:${businessId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'bookings',
+        filter: `business_id=eq.${businessId}`,
+      }, async (payload) => {
+        if (!isActive) return;
+        console.log('[OwnerDashboard] Booking INSERT received', payload);
+        updateDebugState({ lastEventType: 'realtime:INSERT' });
+        await fetchDashboardData(businessId, 'realtime:INSERT');
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'bookings',
+        filter: `business_id=eq.${businessId}`,
+      }, async (payload) => {
+        if (!isActive) return;
+        console.log('[OwnerDashboard] Booking UPDATE received', payload);
+        updateDebugState({ lastEventType: 'realtime:UPDATE' });
+        await fetchDashboardData(businessId, 'realtime:UPDATE');
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'bookings',
+        filter: `business_id=eq.${businessId}`,
+      }, async (payload) => {
+        if (!isActive) return;
+        console.log('[OwnerDashboard] Booking DELETE received', payload);
+        updateDebugState({ lastEventType: 'realtime:DELETE' });
+        await fetchDashboardData(businessId, 'realtime:DELETE');
+      })
+      .subscribe((status) => {
+        if (!isActive) return;
+        console.log('[OwnerDashboard] Subscription status', { businessId, status });
+        updateDebugState({
+          subscriptionStatus: status,
+          lastEventType: `subscription:${status}`,
+        });
+      });
+
+    const interval = window.setInterval(() => {
+      if (!isActive) return;
+      void fetchDashboardData(businessId, 'poll:2s');
+    }, DASHBOARD_POLL_MS);
+
+    return () => {
+      isActive = false;
+      console.log('[OwnerDashboard] Cleaning up booking subscription', { businessId });
+      window.clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchDashboardData, selectedBusinessId, updateDebugState]);
+
+  useEffect(() => {
+    if (!selectedBusinessId) return;
+
+    console.log('[OwnerDashboard] UI render', {
+      businessId: selectedBusinessId,
+      bookings: bookings.length,
+      lastEventType: debugState.lastEventType,
+      lastUpdatedAt: debugState.lastUpdatedAt,
+    });
+  }, [bookings.length, debugState.lastEventType, debugState.lastUpdatedAt, selectedBusinessId]);
 
   const createBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,6 +296,8 @@ export default function OwnerDashboard() {
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
+      setOwnedBusinesses(prev => [data, ...prev]);
+      setSelectedBusinessId(data.id);
       setBusiness(data);
       setShowSetup(false);
       toast({ title: 'Business created!', description: 'Your business is pending admin approval.' });
@@ -154,27 +324,45 @@ export default function OwnerDashboard() {
   };
 
   // Recalculate positions for remaining waiting bookings
-  const recalcPositions = async (excludeId?: string) => {
-    const remaining = bookings
-      .filter(b => b.status === 'waiting' && b.id !== excludeId)
-      .sort((a, b) => a.position - b.position);
-    for (let i = 0; i < remaining.length; i++) {
-      if (remaining[i].position !== i + 1) {
-        await supabase.from('bookings').update({ position: i + 1 }).eq('id', remaining[i].id);
-      }
+  const recalcPositions = async (bizId: string, excludeId?: string) => {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, user_id, position')
+      .eq('business_id', bizId)
+      .eq('status', 'waiting')
+      .order('position', { ascending: true });
+
+    if (error) {
+      console.error('[OwnerDashboard] Failed to recalculate positions', error);
+      return [] as Array<{ id: string; user_id: string; position: number }>;
     }
+
+    const remaining = (data ?? [])
+      .filter(item => item.id !== excludeId)
+      .map((item, index) => ({ ...item, position: index + 1 }));
+
+    await Promise.all(
+      remaining.map(item =>
+        supabase
+          .from('bookings')
+          .update({ position: item.position })
+          .eq('id', item.id)
+      )
+    );
+
     return remaining;
   };
 
   // Send proximity notifications for customers within 3 positions
-  const sendProximityNotifications = async (waitingList: any[]) => {
+  const sendProximityNotifications = async (waitingList: Array<{ id: string; user_id: string; position: number }>) => {
+    if (!business) return;
+
     for (const b of waitingList.slice(0, 3)) {
-      const pos = waitingList.indexOf(b) + 1;
-      const estWait = pos * (business.avg_service_mins || 15);
+      const estWait = b.position * (business.avg_service_mins || 15);
       await supabase.from('notifications').insert({
         user_id: b.user_id,
-        title: pos === 1 ? "You're next!" : 'Almost your turn!',
-        message: `Position ${pos} at ${business.name}. Est. wait: ~${estWait} min.`,
+        title: b.position === 1 ? "You're next!" : 'Almost your turn!',
+        message: `Position ${b.position} at ${business.name}. Est. wait: ~${estWait} min.`,
         type: 'reminder',
         booking_id: b.id,
       });
@@ -182,16 +370,29 @@ export default function OwnerDashboard() {
   };
 
   // Auto-call next waiting user
-  const autoCallNext = async (excludeId: string) => {
-    const callingOthers = bookings.filter(b => b.status === 'calling' && b.id !== excludeId);
-    if (callingOthers.length > 0) return;
+  const autoCallNext = async (bizId: string, excludeId: string) => {
+    if (!business) return;
 
-    const remaining = bookings
-      .filter(b => b.status === 'waiting' && b.id !== excludeId)
-      .sort((a, b) => a.position - b.position);
-    
-    if (remaining.length > 0) {
-      const next = remaining[0];
+    const { data: callingOthers } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('business_id', bizId)
+      .eq('status', 'calling')
+      .neq('id', excludeId)
+      .limit(1);
+
+    if ((callingOthers ?? []).length > 0) return;
+
+    const { data: next } = await supabase
+      .from('bookings')
+      .select('id, user_id')
+      .eq('business_id', bizId)
+      .eq('status', 'waiting')
+      .order('position', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (next) {
       await supabase.from('bookings').update({ status: 'calling' }).eq('id', next.id);
       await supabase.from('notifications').insert({
         user_id: next.user_id,
@@ -204,6 +405,8 @@ export default function OwnerDashboard() {
   };
 
   const callNext = async (bookingId: string, userId: string) => {
+    if (!business) return;
+
     const { error } = await supabase
       .from('bookings')
       .update({ status: 'calling' })
@@ -216,11 +419,14 @@ export default function OwnerDashboard() {
         type: 'calling',
         booking_id: bookingId,
       });
+      await fetchDashboardData(business.id, 'action:call-next');
       toast({ title: 'Customer called!' });
     }
   };
 
   const startService = async (bookingId: string, userId: string) => {
+    if (!business) return;
+
     const { error } = await supabase
       .from('bookings')
       .update({ status: 'in_progress' })
@@ -233,33 +439,39 @@ export default function OwnerDashboard() {
         type: 'info',
         booking_id: bookingId,
       });
+      await fetchDashboardData(business.id, 'action:start-service');
       toast({ title: 'Service started!' });
     }
   };
 
   const completeService = async (bookingId: string, userId: string) => {
+    if (!business) return;
+
     const { error } = await supabase
       .from('bookings')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('id', bookingId);
 
     if (!error) {
-      const remaining = await recalcPositions(bookingId);
-      await autoCallNext(bookingId);
+      const remaining = await recalcPositions(business.id, bookingId);
+      await autoCallNext(business.id, bookingId);
       await sendProximityNotifications(remaining);
+      await fetchDashboardData(business.id, 'action:complete-service');
       toast({ title: 'Service completed!' });
     }
   };
 
   const markNoShow = async (bookingId: string, userId: string) => {
+    if (!business) return;
+
     const { error } = await supabase
       .from('bookings')
       .update({ status: 'no_show', completed_at: new Date().toISOString() })
       .eq('id', bookingId);
 
     if (!error) {
-      const remaining = await recalcPositions(bookingId);
-      await autoCallNext(bookingId);
+      const remaining = await recalcPositions(business.id, bookingId);
+      await autoCallNext(business.id, bookingId);
       await sendProximityNotifications(remaining);
 
       await supabase.from('notifications').insert({
@@ -269,18 +481,22 @@ export default function OwnerDashboard() {
         type: 'info',
         booking_id: bookingId,
       });
+      await fetchDashboardData(business.id, 'action:no-show');
       toast({ title: 'Marked as no-show, next customer called' });
     }
   };
 
   const toggleQueuePause = async () => {
+    if (!business) return;
+
     const newValue = !business.is_queue_paused;
     const { error } = await supabase
       .from('businesses')
       .update({ is_queue_paused: newValue })
       .eq('id', business.id);
     if (!error) {
-      setBusiness({ ...business, is_queue_paused: newValue });
+      await fetchOwnedBusinesses();
+      await fetchDashboardData(business.id, 'action:toggle-pause');
       toast({ title: newValue ? 'Queue paused' : 'Queue resumed' });
     }
   };
@@ -347,6 +563,17 @@ export default function OwnerDashboard() {
     );
   }
 
+  if (!business) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4 text-center">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-foreground">No business selected</p>
+          <p className="text-sm text-muted-foreground">Choose a business to start tracking the live queue.</p>
+        </div>
+      </div>
+    );
+  }
+
   const waitingCount = bookings.filter(b => b.status === 'waiting').length;
   const callingCount = bookings.filter(b => b.status === 'calling').length;
   const inProgressCount = bookings.filter(b => b.status === 'in_progress').length;
@@ -391,6 +618,60 @@ export default function OwnerDashboard() {
             <p className="text-sm font-medium text-destructive">❌ Your business registration was rejected</p>
           </div>
         )}
+
+        {(ownedBusinesses.length > 0) && (
+          <div className="bg-card card-outline rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Current business view</p>
+                <p className="text-xs text-muted-foreground">Realtime updates are scoped to the selected business only.</p>
+              </div>
+              <Badge variant="outline">{ownedBusinesses.length} total</Badge>
+            </div>
+
+            <Select value={selectedBusinessId} onValueChange={setSelectedBusinessId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select business" />
+              </SelectTrigger>
+              <SelectContent>
+                {ownedBusinesses.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name} • {item.status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <div className="bg-card card-outline rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Realtime debug</p>
+              <p className="text-xs text-muted-foreground">Temporary visibility for the booking subscription.</p>
+            </div>
+            <Badge variant="outline">{debugState.subscriptionStatus}</Badge>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Current business_id</p>
+              <p className="font-mono text-foreground break-all">{selectedBusinessId}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Total bookings fetched</p>
+              <p className="font-semibold text-foreground">{debugState.totalBookingsFetched}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Last update</p>
+              <p className="font-semibold text-foreground">{debugState.lastUpdatedAt}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Last event</p>
+              <p className="font-mono text-foreground break-all">{debugState.lastEventType}</p>
+            </div>
+          </div>
+        </div>
 
         {/* Queue Pause Toggle */}
         <div className="flex items-center justify-between bg-card card-outline rounded-xl p-4">
