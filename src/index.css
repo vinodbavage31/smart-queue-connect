@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,80 +6,83 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 220 20% 97%;
+    --foreground: 224 40% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 224 40% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 224 40% 10%;
 
-    --primary: 221 83% 53%;
+    --primary: 245 58% 51%;
+    --primary-glow: 255 70% 62%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 240 20% 95%;
+    --secondary-foreground: 224 40% 10%;
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 240 14% 94%;
+    --muted-foreground: 220 10% 46%;
 
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --accent: 245 58% 96%;
+    --accent-foreground: 245 58% 51%;
 
-    --destructive: 0 84% 60%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 71% 45%;
+    --success: 152 69% 41%;
     --success-foreground: 0 0% 100%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
+
+    --info: 200 80% 50%;
+    --info-foreground: 0 0% 100%;
 
     --border: 220 13% 91%;
     --input: 220 13% 91%;
-    --ring: 221 83% 53%;
+    --ring: 245 58% 51%;
 
-    --radius: 0.75rem;
+    --radius: 0.875rem;
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary: 245 58% 51%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 40% 96%;
-    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-accent: 240 20% 95%;
+    --sidebar-accent-foreground: 224 40% 10%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 221 83% 53%;
-
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+    --sidebar-ring: 245 58% 51%;
   }
 
   .dark {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 221 83% 53%;
+    --background: 224 40% 6%;
+    --foreground: 220 20% 95%;
+    --card: 224 35% 9%;
+    --card-foreground: 220 20% 95%;
+    --popover: 224 35% 9%;
+    --popover-foreground: 220 20% 95%;
+    --primary: 250 60% 60%;
+    --primary-glow: 260 70% 70%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
+    --secondary: 224 30% 14%;
+    --secondary-foreground: 220 20% 95%;
+    --muted: 224 30% 14%;
+    --muted-foreground: 220 15% 55%;
+    --accent: 245 40% 15%;
+    --accent-foreground: 250 60% 60%;
     --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
-    --success: 142 71% 45%;
+    --destructive-foreground: 220 20% 95%;
+    --success: 152 69% 41%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
-    --ring: 221 83% 53%;
+    --info: 200 80% 50%;
+    --info-foreground: 0 0% 100%;
+    --border: 224 25% 16%;
+    --input: 224 25% 16%;
+    --ring: 250 60% 60%;
   }
 }
 
@@ -90,7 +93,7 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Plus Jakarta Sans', 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 }
 
@@ -100,12 +103,17 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .card-outline {
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), var(--shadow-sm);
+  .card-glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+    box-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
   }
 
   .card-elevated {
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 8px 30px -8px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  }
+
+  .card-outline {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04);
   }
 
   .pulse-live {
@@ -113,15 +121,55 @@
   }
 
   @keyframes pulse-ring {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   .gradient-primary {
-    background: linear-gradient(135deg, hsl(221, 83%, 53%), hsl(221, 83%, 40%));
+    background: linear-gradient(135deg, hsl(245, 58%, 51%), hsl(255, 70%, 62%));
+  }
+
+  .gradient-hero {
+    background: linear-gradient(135deg, hsl(245, 58%, 51%), hsl(270, 60%, 55%), hsl(285, 50%, 50%));
+  }
+
+  .gradient-success {
+    background: linear-gradient(135deg, hsl(152, 69%, 41%), hsl(160, 60%, 48%));
+  }
+
+  .gradient-warning {
+    background: linear-gradient(135deg, hsl(38, 92%, 50%), hsl(28, 90%, 55%));
+  }
+
+  .gradient-danger {
+    background: linear-gradient(135deg, hsl(0, 72%, 51%), hsl(350, 70%, 55%));
+  }
+
+  .status-available {
+    @apply bg-success/10 text-success border-success/20;
+  }
+
+  .status-busy {
+    @apply bg-warning/10 text-warning border-warning/20;
+  }
+
+  .status-full {
+    @apply bg-destructive/10 text-destructive border-destructive/20;
+  }
+
+  .urgency-badge {
+    @apply text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full;
+  }
+
+  .bottom-nav-item {
+    @apply flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors duration-200;
+  }
+
+  .bottom-nav-active {
+    @apply text-primary;
+  }
+
+  .bottom-nav-inactive {
+    @apply text-muted-foreground hover:text-foreground;
   }
 }
