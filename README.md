@@ -18,8 +18,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-6366f1.svg?style=for-the-badge)](CONTRIBUTING.md)
-[![Made with Love](https://img.shields.io/badge/Made%20With-❤️-ef4444.svg?style=for-the-badge)](#)
 [![Open Source](https://img.shields.io/badge/Open-Source-f59e0b.svg?style=for-the-badge)](#)
+[![Live Demo](https://img.shields.io/badge/Live-Demo-ef4444.svg?style=for-the-badge)](https://smart-queue-connect.vercel.app)
 
 <br/>
 
@@ -29,7 +29,7 @@
 
 <br/>
 
-[🚀 Live Demo](#) · [📖 Docs](#documentation) · [🐛 Report Bug](issues) · [✨ Request Feature](issues) · [🤝 Contribute](#contributing)
+[Live App](https://smart-queue-connect.vercel.app) · [Report Bug](https://github.com/vinodbavage31/smart-queue-connect/issues) · [Request Feature](https://github.com/vinodbavage31/smart-queue-connect/issues) · [Contribute](#contributing)
 
 ---
 
@@ -37,105 +37,106 @@
 
 <br/>
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [✨ Overview](#-overview)
-- [🎯 Key Features](#-key-features)
-- [🏗️ Architecture](#️-architecture)
-- [🛠️ Tech Stack](#️-tech-stack)
-- [📦 Installation](#-installation)
-- [⚙️ Configuration](#️-configuration)
-- [🗄️ Database Schema](#️-database-schema)
-- [📡 API Reference](#-api-reference)
-- [👥 User Roles](#-user-roles)
-- [📱 Screenshots](#-screenshots)
-- [🤝 Contributing](#-contributing)
-- [📄 License](#-license)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Database Schema](#database-schema)
+- [API Reference](#api-reference)
+- [User Roles](#user-roles)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
 <br/>
 
-## ✨ Overview
+## Overview
 
 SmartQ reimagines the waiting experience for both customers and businesses. Whether it's a barbershop, hospital, restaurant, or service center — SmartQ digitizes the queue, delivers real-time updates, and eliminates physical waiting.
 
 ```
 Customer opens app  →  Finds nearby business  →  Joins queue remotely
-       ↓
-Receives digital token  →  Gets notified when turn is near  →  Arrives just in time ✅
+       |
+Receives digital token  →  Gets notified when turn is near  →  Arrives just in time
 ```
 
 Built with a **mobile-first** philosophy, SmartQ works seamlessly across web and mobile, making it accessible to everyone.
 
-<br/>
-
-## 🎯 Key Features
-
-### 👤 For Customers
-| Feature | Description |
-|---|---|
-| 📍 **Nearby Discovery** | Find businesses by location & category |
-| 👁️ **Live Queue View** | See real-time queue length & estimated wait |
-| 🎫 **Digital Token** | Get your virtual queue number instantly |
-| 📅 **Advance Booking** | Book a slot up to 4 days ahead |
-| 🔔 **Smart Notifications** | Push + WhatsApp alerts when your turn nears |
-| 📜 **History & Cancellation** | Manage all your bookings in one place |
-
-### 🏢 For Business Owners
-| Feature | Description |
-|---|---|
-| ⚡ **Live Dashboard** | Monitor your queue in real-time |
-| ✅ **Accept / Reject** | Control who enters your queue |
-| 📣 **Customer Alerts** | Send direct notifications to waiting customers |
-| 📊 **Analytics** | Daily customers, avg. wait time, peak hours |
-| 🔄 **Auto-Advance** | Queue moves automatically when service completes |
-| 🛠️ **Service Management** | Define services with custom durations |
-
-### 🔑 For Admins
-| Feature | Description |
-|---|---|
-| 🏢 **Business Management** | Approve, suspend, or manage all businesses |
-| 📈 **Platform Analytics** | Bird's-eye view of platform-wide metrics |
-| 🛡️ **Role Management** | Full control over users and permissions |
+**Live preview:** https://smart-queue-connect.vercel.app
 
 <br/>
 
-## 🏗️ Architecture
+## Key Features
+
+### For Customers
+| Feature | Description |
+|---|---|
+| Nearby Discovery | Find businesses by location and category |
+| Live Queue View | See real-time queue length and estimated wait |
+| Digital Token | Get your virtual queue number instantly |
+| Advance Booking | Book a slot up to 4 days ahead |
+| Smart Notifications | Push and WhatsApp alerts when your turn nears |
+| History and Cancellation | Manage all your bookings in one place |
+
+### For Business Owners
+| Feature | Description |
+|---|---|
+| Live Dashboard | Monitor your queue in real-time |
+| Accept / Reject | Control who enters your queue |
+| Customer Alerts | Send direct notifications to waiting customers |
+| Analytics | Daily customers, avg. wait time, peak hours |
+| Auto-Advance | Queue moves automatically when service completes |
+| Service Management | Define services with custom durations |
+
+### For Admins
+| Feature | Description |
+|---|---|
+| Business Management | Approve, suspend, or manage all businesses |
+| Platform Analytics | Bird's-eye view of platform-wide metrics |
+| Role Management | Full control over users and permissions |
+
+<br/>
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     SmartQ Platform                      │
-├──────────────┬──────────────────┬───────────────────────┤
-│   Customer   │  Business Owner  │        Admin          │
-│   Web / App  │    Dashboard     │       Panel           │
-└──────┬───────┴────────┬─────────┴──────────┬────────────┘
-       │                │                    │
-       └────────────────▼────────────────────┘
-                        │
-              ┌─────────▼──────────┐
-              │    REST API Layer   │
-              │   (Node.js/Express) │
-              └─────────┬──────────┘
-                        │
-         ┌──────────────┼──────────────┐
-         ▼              ▼              ▼
-   ┌───────────┐  ┌──────────┐  ┌──────────────┐
-   │ PostgreSQL │  │  Redis   │  │  WebSockets  │
-   │  (Primary) │  │ (Cache)  │  │ (Real-time)  │
-   └───────────┘  └──────────┘  └──────────────┘
-                        │
-         ┌──────────────┼──────────────┐
-         ▼              ▼              ▼
-   ┌──────────┐   ┌──────────┐  ┌───────────┐
-   │   Push   │   │ WhatsApp │  │   Email   │
-   │  Notify  │   │   API    │  │  (SMTP)   │
-   └──────────┘   └──────────┘  └───────────┘
++----------------------------------------------------------+
+|                      SmartQ Platform                      |
++---------------+------------------+-----------------------+
+|   Customer    |  Business Owner  |        Admin          |
+|   Web / App   |    Dashboard     |        Panel          |
++-------+-------+--------+---------+----------+-----------+
+        |                |                    |
+        +----------------+--------------------+
+                         |
+               +---------+---------+
+               |    REST API Layer  |
+               |  (Node.js/Express) |
+               +---------+---------+
+                         |
+        +----------------+----------------+
+        |                |                |
+  +----------+    +----------+    +--------------+
+  | PostgreSQL|    |  Redis   |    |  WebSockets  |
+  | (Primary) |    | (Cache)  |    | (Real-time)  |
+  +----------+    +----------+    +--------------+
+                         |
+        +----------------+----------------+
+        |                |                |
+  +----------+    +----------+    +----------+
+  |   Push   |    | WhatsApp |    |  Email   |
+  |  Notify  |    |   API    |    |  (SMTP)  |
+  +----------+    +----------+    +----------+
 ```
 
 <br/>
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Frontend
 ![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -148,17 +149,17 @@ Built with a **mobile-first** philosophy, SmartQ works seamlessly across web and
 ![Express.js](https://img.shields.io/badge/Express.js-404D59?style=flat-square&logo=express&logoColor=white)
 ![Socket.io](https://img.shields.io/badge/Socket.io-010101?style=flat-square&logo=socket.io&logoColor=white)
 
-### Database & Cache
+### Database and Cache
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat-square&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white)
 
-### DevOps & Cloud
+### DevOps and Cloud
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
-![AWS](https://img.shields.io/badge/AWS-FF9900?style=flat-square&logo=amazon-aws&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
 
 <br/>
 
-## 📦 Installation
+## Installation
 
 ### Prerequisites
 
@@ -170,8 +171,8 @@ Built with a **mobile-first** philosophy, SmartQ works seamlessly across web and
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/smartq.git
-cd smartq
+git clone https://github.com/vinodbavage31/smart-queue-connect.git
+cd smart-queue-connect
 ```
 
 ### Backend Setup
@@ -228,7 +229,7 @@ docker-compose up --build
 
 <br/>
 
-## ⚙️ Configuration
+## Configuration
 
 Create a `.env` file in the `/server` directory:
 
@@ -266,7 +267,7 @@ SMTP_PASS=your_app_password
 
 <br/>
 
-## 🗄️ Database Schema
+## Database Schema
 
 ```sql
 -- Users Table
@@ -284,7 +285,7 @@ CREATE TABLE businesses (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id    UUID REFERENCES users(id),
   name        VARCHAR(150) NOT NULL,
-  category    VARCHAR(50),              -- barber, hospital, restaurant, etc.
+  category    VARCHAR(50),
   address     TEXT,
   latitude    DECIMAL(9,6),
   longitude   DECIMAL(9,6),
@@ -297,7 +298,7 @@ CREATE TABLE services (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id     UUID REFERENCES businesses(id),
   name            VARCHAR(100) NOT NULL,
-  duration_mins   INTEGER NOT NULL,     -- e.g., 20 for a haircut
+  duration_mins   INTEGER NOT NULL,
   is_active       BOOLEAN DEFAULT TRUE
 );
 
@@ -338,13 +339,13 @@ CREATE TABLE notifications (
 
 <br/>
 
-## 📡 API Reference
+## API Reference
 
 ### Auth
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/auth/register` | Register new user |
-| `POST` | `/api/auth/login` | Login & get JWT |
+| `POST` | `/api/auth/login` | Login and get JWT |
 | `POST` | `/api/auth/refresh` | Refresh access token |
 
 ### Queues
@@ -372,86 +373,57 @@ CREATE TABLE notifications (
 
 <br/>
 
-## 👥 User Roles
+## User Roles
 
 ```
-┌─────────────┬────────────────────────────────────────────┐
-│    Role     │              Capabilities                   │
-├─────────────┼────────────────────────────────────────────┤
-│  Customer   │  Browse, join queue, book, cancel, receive │
-│             │  notifications, view history               │
-├─────────────┼────────────────────────────────────────────┤
-│  Business   │  Manage services, control queue, view      │
-│   Owner     │  analytics, send alerts, call customers    │
-├─────────────┼────────────────────────────────────────────┤
-│    Admin    │  Approve businesses, manage users,         │
-│             │  view platform-wide analytics              │
-└─────────────┴────────────────────────────────────────────┘
++-------------+--------------------------------------------+
+|    Role     |              Capabilities                  |
++-------------+--------------------------------------------+
+|  Customer   |  Browse, join queue, book, cancel,        |
+|             |  receive notifications, view history       |
++-------------+--------------------------------------------+
+|  Business   |  Manage services, control queue, view     |
+|   Owner     |  analytics, send alerts, call customers   |
++-------------+--------------------------------------------+
+|    Admin    |  Approve businesses, manage users,        |
+|             |  view platform-wide analytics             |
++-------------+--------------------------------------------+
 ```
 
 <br/>
 
-## 📱 Screenshots
+## Contributing
 
-> *Screenshots will be added after the initial UI build is complete.*
+Contributions are welcome from everyone — whether you're fixing a bug, improving documentation, or proposing a new feature. SmartQ is built by the community, for the community.
 
-| Customer App | Business Dashboard | Admin Panel |
-|:---:|:---:|:---:|
-| `Coming Soon` | `Coming Soon` | `Coming Soon` |
-
-<br/>
-
-## 🤝 Contributing
-
-We welcome contributions from everyone — whether you're fixing a bug, improving documentation, or proposing a major new feature. SmartQ is built by the community, for the community.
-
-### How to Contribute
-
-1. **Fork** the repository
-   ```bash
-   git fork https://github.com/your-username/smartq.git
-   ```
-
-2. **Create a feature branch** from `main`
+1. Fork the repository
+2. Create a feature branch from `main`
    ```bash
    git checkout -b feature/your-feature-name
    ```
-
-3. **Make your changes** following the code style guide below
-
-4. **Commit** with a clear, descriptive message
+3. Make your changes following the code style guide below
+4. Commit with a clear, descriptive message
    ```bash
    git commit -m "feat: add WhatsApp notification for queue reminders"
    ```
-   > We follow [Conventional Commits](https://www.conventionalcommits.org/) — use prefixes like `feat:`, `fix:`, `docs:`, `chore:`
-
-5. **Push** your branch
+   > Follow [Conventional Commits](https://www.conventionalcommits.org) — use prefixes like `feat:`, `fix:`, `docs:`, `chore:`
+5. Push your branch
    ```bash
    git push origin feature/your-feature-name
    ```
+6. Open a Pull Request against `main` with a clear title, description, screenshots for UI changes, and reference to any related issues (`Closes #123`)
 
-6. **Open a Pull Request** against the `main` branch with:
-   - A clear title and description
-   - Screenshots or screen recordings if it's a UI change
-   - Reference to any related issues (`Closes #123`)
-
-### 📐 Code Style
-- Use **TypeScript** for all new code
+**Code Style**
+- Use TypeScript for all new code
 - Run `npm run lint` before committing
 - Write tests for new features where possible
 - Keep PRs focused — one feature or fix per PR
 
-### 🐛 Reporting Bugs
-Open an [issue](issues) with the `bug` label. Please include:
-- Steps to reproduce
-- Expected vs actual behavior
-- Your OS, browser, and Node.js version
+**Reporting Bugs** — open an [issue](https://github.com/vinodbavage31/smart-queue-connect/issues) with steps to reproduce, expected vs actual behavior, and your environment details.
 
-### 💡 Suggesting Features
-Open an [issue](issues) with the `enhancement` label and describe the use case clearly.
+**Suggesting Features** — open an [issue](https://github.com/vinodbavage31/smart-queue-connect/issues) with the `enhancement` label and describe the use case clearly.
 
-### 🙏 Code of Conduct
-All contributors are expected to uphold a respectful and inclusive environment. Be kind. Be constructive.
+All contributors are expected to uphold a respectful and inclusive environment.
 
 <br/>
 
@@ -459,7 +431,7 @@ All contributors are expected to uphold a respectful and inclusive environment. 
 
 <div align="center">
 
-## 📄 License
+## License
 
 This project is licensed under the **MIT License** — free to use, modify, and distribute.
 
@@ -469,10 +441,10 @@ See the [LICENSE](LICENSE) file for full details.
 
 ---
 
-**Built with ❤️ by the SmartQ community**
+**Built by [@vinodbavage31](https://github.com/vinodbavage31)**
 
-*If SmartQ helped you, please ⭐ star this repo — it means a lot!*
+*If SmartQ helped you, consider starring the repo — it helps others find it.*
 
-[![Star History Chart](https://img.shields.io/github/stars/your-username/smartq?style=social)](#)
+[![GitHub stars](https://img.shields.io/github/stars/vinodbavage31/smart-queue-connect?style=social)](https://github.com/vinodbavage31/smart-queue-connect)
 
 </div>
